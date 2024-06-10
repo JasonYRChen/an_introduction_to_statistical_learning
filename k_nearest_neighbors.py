@@ -41,12 +41,52 @@ def k_nearest_neighbors(k, x, X, y):
     return nearests, n, odds
 
 
-x = np.array([1, 2, 3])
-X = np.random.randint(2, 7, 60).reshape(-1, 3)
-#y = np.random.randint(1, 4, X.shape[0])
-y = np.array(['a', 'b', 'c', 'd'] * 15)
+if __name__ == '__main__':
+#    x = np.array([1, 2, 3])
+#    X = np.random.randint(2, 7, 60).reshape(-1, 3)
+#    #y = np.random.randint(1, 4, X.shape[0])
+#    y = np.array(['a', 'b', 'c', 'd'] * 15)
 
-np.random.shuffle(y)
-print(X)
-print(y)
-print(k_nearest_neighbors(5, x, X, y))
+#    np.random.shuffle(y)
+#    print(X)
+#    print(y)
+#    print(k_nearest_neighbors(5, x, X, y))
+
+    # graphic demo
+    x_min = -3
+    x_max = 3
+    y_min = -3
+    y_max = 3
+    data = 180
+    mesh = 60
+    x = [0.7, 0]
+    k = 5
+
+    # dataset
+    x = np.array(x)
+    X = np.random.rand(data, 2)
+    X[:, 0] = X[:, 0] * (x_max - x_min) + x_min
+    X[:, 1] = X[:, 1] * (y_max - y_min) + y_min
+    y = np.where(X[:, 0]**2/4+X[:, 1]**2/2.25 < 1, 1, -1)
+    y[(X[:, 0] > -0.5) & (X[:, 0] < 0.5)] = -1
+
+    # make meshgrid
+    xx, yy = np.linspace(x_min, x_max, mesh), np.linspace(y_min, y_max, mesh)
+    xx, yy = np.meshgrid(xx, yy)
+    xx = xx.flatten()
+    yy = yy.flatten()
+
+    # fit and predict meshgrid
+    y_grid = [k_nearest_neighbors(k, (i, j), X, y)[0][0] for i, j in zip(xx, yy)]
+    y_grid = np.array(y_grid)
+    print('x fitting result:')
+    print(k_nearest_neighbors(k, x, X, y))
+
+    # scatter plot
+    y_color = np.where(y > 0, 'b', 'r')
+    y_grid_color = np.where(y_grid > 0, 'b', 'r')
+    plt.scatter(X[:, 0], X[:, 1], c=y_color, s=5) # training data
+    plt.scatter(xx, yy, c=y_grid_color, s=0.1) # meshgrid
+    plt.scatter(x[0], x[1], c='g', s=30) # x
+
+    plt.show()
