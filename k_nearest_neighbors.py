@@ -2,7 +2,37 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-def k_nearest_neighbors(k, x, X, y):
+def find_k_neighbors(k, x, X, y):
+    n = k
+    X = np.array(X)
+    X -= x
+    X **= 2
+    distances = X.sum(1)
+    sorted_arg = np.argsort(distances) # if k is comparably small to len(y),
+                                       # then np.argsort is not efficient.
+    while n < len(y) and distances[sorted_arg[n-1]] == distances[sorted_arg[n]]:
+        n += 1 # n may be larger than assigned if there are multiple kth smallest
+    neighbors = y[sorted_arg[:n]] # filter out the n neighbors
+
+    return neighbors, n
+
+
+def k_nearest_neighbors_regression(k, x, X, y):
+    """
+        k: int, number of nearest neighbors to 'x'.
+        x: list like, 1 x m of test observation.
+        X: ndarray, n x m of known observations.
+        y: ndarray, n x 1 of classes' labels of each observation in 'X'.
+
+        return:
+          predict: float, the predicted value.
+    """
+    neighbors, n = find_k_neighbors(k, x, X, y)
+    predict = sum(neighbors) / n
+    return predict
+
+
+def k_nearest_neighbors_classifier(k, x, X, y):
     """
         k: int, number of nearest neighbors to 'x'.
         x: list like, 1 x m of test observation.
@@ -16,16 +46,7 @@ def k_nearest_neighbors(k, x, X, y):
           odds: float, the odd of test observation to be in the group of 'nearest'
     """
 
-    n = k
-    X = np.array(X)
-    X -= x
-    X **= 2
-    distances = X.sum(1)
-    sorted_arg = np.argsort(distances) # if k is comparably small to len(y),
-                                       # then np.argsort is not efficient.
-    while n < len(y) and distances[sorted_arg[n-1]] == distances[sorted_arg[n]]:
-        n += 1 # n may be larger than assigned if there are multiple kth smallest
-    neighbors = y[sorted_arg[:n]] # filter out the n neighbors
+    neighbors, n = find_k_neighbors(k, x, X, y)
 
     # conditional probabilities
     y_unique, counts = np.unique(neighbors, return_counts=True)
@@ -52,6 +73,7 @@ if __name__ == '__main__':
 #    print(y)
 #    print(k_nearest_neighbors(5, x, X, y))
 
+    #=========== KNN classifier ===========
     # graphic demo
     x_min = -3
     x_max = 3
@@ -62,7 +84,7 @@ if __name__ == '__main__':
     x = [0.7, 0]
     k = 5
 
-    # dataset
+    # KNN classifier dataset
     x = np.array(x)
     X = np.random.rand(data, 2)
     X[:, 0] = X[:, 0] * (x_max - x_min) + x_min
@@ -77,10 +99,10 @@ if __name__ == '__main__':
     yy = yy.flatten()
 
     # fit and predict meshgrid
-    y_grid = [k_nearest_neighbors(k, (i, j), X, y)[0][0] for i, j in zip(xx, yy)]
+    y_grid = [k_nearest_neighbors_classifier(k, (i, j), X, y)[0][0] for i, j in zip(xx, yy)]
     y_grid = np.array(y_grid)
     print('x fitting result:')
-    print(k_nearest_neighbors(k, x, X, y))
+    print(k_nearest_neighbors_classifier(k, x, X, y))
 
     # scatter plot
     y_color = np.where(y > 0, 'b', 'r')
@@ -88,5 +110,23 @@ if __name__ == '__main__':
     plt.scatter(X[:, 0], X[:, 1], c=y_color, s=5) # training data
     plt.scatter(xx, yy, c=y_grid_color, s=0.1) # meshgrid
     plt.scatter(x[0], x[1], c='g', s=30) # x
+
+    #============= KNN regression ============
+    k = 5
+    x = 2
+
+    # KNN regression dataset
+    x = np.array(x)
+    X = np.linspace(x_min, x_max, mesh).reshape(-1, 1)
+    y = 2 * X - 3 + np.random.rand(mesh).reshape(-1, 1)
+
+    # predict
+    y_hat = k_nearest_neighbors_regression(k, x, X, y)
+    print(f'KNN regression: @x={x}, y={y_hat}')
+
+    # scatter plot
+    plt.figure()
+    plt.scatter(X, y, s=0.5, c='b')
+    plt.scatter(x, y_hat, s=10, c='r')
 
     plt.show()
