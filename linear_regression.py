@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from linear_algebra.singular_value_decomposition import singular_value_decomposition as svd
+#from linear_algebra.singular_value_decomposition import singular_value_decomposition as svd
 
 
 def linear_regression(matrix, y, add_intercept=True):
@@ -13,8 +13,12 @@ def linear_regression(matrix, y, add_intercept=True):
         ones = np.ones(matrix.shape[0]).reshape(matrix.shape[0], 1)
         matrix = np.hstack((ones, matrix))
 
-    u, s, v = svd(matrix)
-    s[s != 0] = (1 / s[s != 0])
+#    u, s, v = svd(matrix)
+    u, d, v = np.linalg.svd(matrix)
+    d = 1 / d
+    s = np.zeros((u.shape[1], v.shape[0]))
+    for i, value in enumerate(d):
+        s[i, i] = value
     s = s.T
     coefficients = v @ s @ u.T @ y
     return coefficients
