@@ -154,9 +154,11 @@ class Tree:
 
 
 class DecisionTreeClassifier:
-    def __init__(self, pruning_rate=0, function='gini', max_depth=np.inf):
+    def __init__(self, pruning_rate=0, function='gini', max_depth=np.inf,
+                 num_random_feature=None):
         self.tree = Tree(max_depth)
         self.pruning_rate = pruning_rate
+        self._num_random_feature = num_random_feature
         self._impurity_functions = {'entropy': self.loss_entropy, 
                                     'gini': self.loss_gini, 
                                     'classification': self.loss_classification
@@ -266,22 +268,35 @@ class DecisionTreeClassifier:
     def fit(self, X, y, is_categorical=None, sample_weights=None):
         # 'is_categorical' is an array to specify which features (columns) in
         # 'X' are categorical data
+
+        rows, cols = X.shape
+
         if is_categorical is None:
-            is_categorical = np.zeros(X.shape[1])
+            is_categorical = np.zeros(cols)
         
         if sample_weights is None:
-            sample_weights = np.ones(X.shape[0])
+            sample_weights = np.ones(rows)
 
-        self.tree.root = self.tree.create_node(np.arange(X.shape[0]))
-        nodes_to_process = deque([self.tree.root])
+        col_indices = np.arange(cols) # indices of columns
+        feature_num = self._num_random_feature
+
+        self.tree.root = self.tree.create_node(np.arange(rows)) # create root
+        nodes_to_process = deque([self.tree.root]) # nodes to split
 
         while nodes_to_process:
             node = nodes_to_process.popleft()
             indices = node.indices
 
+            # to use all the features or random select part of them
+            if feature_num is None:
+               col_picked = col_indices
+            else:
+                col_picked = np.random.choice(col_indices, feature_num, False)
+
             # greedily find partition criterion
-            feature, criterion, sign = _decision_stump(X[indices],
+            column, criterion, sign = _decision_stump(X[indices][:, col_picked],
                 y[indices], self._func, is_categorical, sample_weights[indices])
+            feature = col_picked[column]
 
             # renew node's attributes
             node.feature, node.criterion, node.sign, node.impurity = \
@@ -334,11 +349,13 @@ class DecisionTreeClassifier:
 
 if __name__ == '__main__':
     alpha = 0.1
-    dtc_unprune = DecisionTreeClassifier(pruning_rate=0, max_depth=np.inf)
-    dtc_prune = DecisionTreeClassifier(pruning_rate=alpha, max_depth=np.inf)
-
-    row, col = 20, 3
+    row, col = 20, 8
+    num_random_feature = 2
     no_of_randint = 3
+
+    dtc_unprune = DecisionTreeClassifier()
+    dtc_random = DecisionTreeClassifier(num_random_feature=num_random_feature)
+    dtc_prune = DecisionTreeClassifier(pruning_rate=alpha)
 
     X = np.zeros((row, col))
 
@@ -376,6 +393,10 @@ if __name__ == '__main__':
     print('---------Unpruned----------')
     dtc_unprune.fit(X, y, is_categorical, sw)
     dtc_unprune.tree.expand_tree()
+
+    print('---------random forest like----------')
+    dtc_random.fit(X, y, is_categorical, sw)
+    dtc_random.tree.expand_tree()
 
     print('---------Pruned----------')
     dtc_prune.fit(X, y, is_categorical, sw)
