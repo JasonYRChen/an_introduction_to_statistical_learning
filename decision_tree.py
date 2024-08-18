@@ -1,6 +1,7 @@
 import heapq
 import numpy as np
 from collections import deque
+from abc import ABC, abstractmethod
 
 
 np.set_printoptions(precision=3)
@@ -151,6 +152,188 @@ class Tree:
             inv_sign = '!=' if node.sign == '==' else '>'
             print(f'{" "*2*node.depth}--if feature {node.feature} {inv_sign} {node.criterion}')
             self.expand_tree(node.right)
+
+
+class _DecisionTreeBase(ABC):
+    def __init__(self, pruning_rate=0,  max_depth=np.inf, loss_function=None,
+                 random_feature_ratio=1):
+        self.tree = Tree(max_depth)
+        self.pruning_rate = pruning_rate
+        self._loss_func = self._loss_function(loss_function) # string
+        self._random_feature_ratio = random_feature_ratio # None for sqrt(feature)
+
+    @abstractmethod
+    def _loss_function(self, name):
+        """
+            First implement all the loss or impurity functions needed, then
+            add them into a dictionary in "name: method" pair in here. 
+            Return the corresponding method of the name.
+        """
+        pass
+
+    def test(self):
+        return 'this is a test'
+
+    @staticmethod
+    def _renew_indices(X, indices, feature, criterion, sign):
+        # partition indices by sign
+        if sign == '==':
+            l_idx = np.where(X[indices][:, feature] == criterion)[0]
+            r_idx = np.where(X[indices][:, feature] != criterion)[0]
+        else:
+            assert sign == '<='
+            l_idx = np.where(X[indices][:, feature] <= criterion)[0]
+            r_idx = np.where(X[indices][:, feature] > criterion)[0]
+             
+        # indices for left and right sub nodes
+        left_indices = indices[l_idx]
+        right_indices = indices[r_idx]
+
+        return left_indices, right_indices
+
+    def _total_impurity(self, leaves):
+        total_elements = 0
+        total_impurity = 0
+        for leaf in leaves:
+            total_elements += len(leaf.indices)
+            total_impurity += len(leaf.indices) * leaf.impurity
+        total_impurity /= total_elements
+
+        return total_elements, total_impurity
+
+    def _prune(self):
+        # Except for the root, every node must have a sibling. 
+        # They must exist or be removed together.
+
+        new_leaves = set(self.tree.leaves) # need to covert to deque at the end
+        heap = list(self.tree.leaves)
+        heapq.heapify(heap)
+        alpha = self.pruning_rate
+
+        total_elements, total_impurity = self._total_impurity(self.tree.leaves)
+        penalty = total_impurity + alpha * len(new_leaves)
+
+        while heap:
+            node = heapq.heappop(heap)
+            if node in new_leaves:
+                sibling = node._sibling()
+
+                if sibling is not None and sibling.is_leaf():
+                    # only if the node is not the root and its sibling is a
+                    # leaf can join the pruning process
+                    parent = node.parent
+                    new_total_impurity = total_impurity +\
+                                      (len(parent.indices)*parent.impurity -\
+                                       len(node.indices)*node.impurity -\
+                                       len(sibling.indices)*sibling.impurity) /\
+                                       total_elements
+                    new_penalty = new_total_impurity + alpha*(len(new_leaves)-1)
+
+                    if new_penalty < penalty:
+                        penalty, total_impurity = new_penalty, new_total_impurity
+                        new_leaves.remove(node)
+                        new_leaves.remove(sibling)
+                        new_leaves.add(node.parent)
+                        heapq.heappush(heap, node.parent)
+
+        new_leaves = deque(new_leaves) # convert to deque to be compatible
+
+        # cut off all the leaves beneath new leaves
+        for leaf in new_leaves:
+            leaf.left = leaf.right = None
+
+        return new_leaves
+
+    @staticmethod
+    @abstractmethod
+    def _set_prediction(y, leaves):
+        """
+            to predict all the leaves by regression or classification
+        """
+        pass
+
+    def fit(self, X, y, is_categorical=None, sample_weights=None):
+        # 'is_categorical' is an array to specify which features (columns) in
+        # 'X' are categorical data
+
+        rows, cols = X.shape
+
+        if is_categorical is None:
+            is_categorical = np.zeros(cols)
+        
+        if sample_weights is None:
+            sample_weights = np.ones(rows)
+
+        col_indices = np.arange(cols) # indices of columns
+        if self._random_feature_ratio is None:
+            feature_num = round((cols) ** 0.5)
+        else:
+            feature_num = round(self._random_feature_ratio * cols)
+
+        self.tree.root = self.tree.create_node(np.arange(rows)) # create root
+        nodes_to_process = deque([self.tree.root]) # nodes to split
+
+        while nodes_to_process:
+            node = nodes_to_process.popleft()
+            indices = node.indices
+
+            # random choose features w/o replacement at given number
+            col_picked = np.random.choice(col_indices, feature_num, False)
+
+            # greedily find partition criterion
+            column, criterion, sign = _decision_stump(X[indices][:, col_picked],
+                y[indices], self._loss_func, is_categorical[col_picked], 
+                sample_weights[indices])
+            feature = col_picked[column]
+
+            # renew node's attributes
+            node.feature, node.criterion, node.sign, node.impurity = \
+                feature, criterion, sign,\
+                self._loss_func(y[indices], sample_weights[indices])
+
+            # partition indices by sign
+            left_indices, right_indices = self._renew_indices(X, indices,
+                feature, criterion, sign)
+
+            # nodes to further partition or end as leaves
+            if not (left_indices.size and right_indices.size) or\
+                node.depth == self.tree.max_depth:
+                self.tree.leaves.append(node) # end as leaf
+            else:
+                # connect parent node and descendants
+                self.tree._link_nodes(node,
+                    self.tree.create_node(left_indices, node.depth+1),
+                    self.tree.create_node(right_indices, node.depth+1))
+
+                # to further partition
+                nodes_to_process.append(node.left)
+                nodes_to_process.append(node.right)
+
+        # prune the tree if pruning rate > 0
+        if self.pruning_rate:
+            new_leaves = self._prune()
+            self.tree.leaves = new_leaves
+
+        self._set_prediction(y, self.tree.leaves) # prediction of each leaf
+
+    def predict(self, X):
+        rows = X.shape[0]
+        y_hat = np.empty(rows)
+        for i in range(rows):
+            node = self.tree.root
+            while not node.is_leaf():
+                feature, sign, criterion = node.feature, node.sign, node.criterion
+                cond1 = (sign == '==') and (X[i, feature] == criterion)
+                cond2 = (sign == '<=') and (X[i, feature] <= criterion)
+                if cond1 or cond2:
+                    node = node.left
+                else:
+                    assert (X[i, feature] != criterion) or\
+                           (X[i, feature] > criterion)
+                    node = node.right
+            y_hat[i] = node.y_hat
+
+        return y_hat
 
 
 class DecisionTreeClassifier:
@@ -341,7 +524,8 @@ class DecisionTreeClassifier:
                 if cond1 or cond2:
                     node = node.left
                 else:
-                    assert (X[i, feature] != criterion) or (X[i, feature] > criterion)
+                    assert (X[i, feature] != criterion) or\
+                           (X[i, feature] > criterion)
                     node = node.right
             y_hat[i] = node.y_hat
 
