@@ -155,10 +155,10 @@ class Tree:
 
 class DecisionTreeClassifier:
     def __init__(self, pruning_rate=0, function='gini', max_depth=np.inf,
-                 num_random_feature=None):
+                 random_feature_ratio=1):
         self.tree = Tree(max_depth)
         self.pruning_rate = pruning_rate
-        self._num_random_feature = num_random_feature
+        self._random_feature_ratio = random_feature_ratio # None for sqrt(feature)
         self._impurity_functions = {'entropy': self.loss_entropy, 
                                     'gini': self.loss_gini, 
                                     'classification': self.loss_classification
@@ -278,7 +278,10 @@ class DecisionTreeClassifier:
             sample_weights = np.ones(rows)
 
         col_indices = np.arange(cols) # indices of columns
-        feature_num = self._num_random_feature
+        if self._random_feature_ratio is None:
+            feature_num = round((cols) ** 0.5)
+        else:
+            feature_num = round(self._random_feature_ratio * cols)
 
         self.tree.root = self.tree.create_node(np.arange(rows)) # create root
         nodes_to_process = deque([self.tree.root]) # nodes to split
@@ -287,15 +290,13 @@ class DecisionTreeClassifier:
             node = nodes_to_process.popleft()
             indices = node.indices
 
-            # to use all the features or random select part of them
-            if feature_num is None:
-               col_picked = col_indices
-            else:
-                col_picked = np.random.choice(col_indices, feature_num, False)
+            # random choose features w/o replacement at given number
+            col_picked = np.random.choice(col_indices, feature_num, False)
 
             # greedily find partition criterion
             column, criterion, sign = _decision_stump(X[indices][:, col_picked],
-                y[indices], self._func, is_categorical, sample_weights[indices])
+                y[indices], self._func, is_categorical[col_picked], 
+                sample_weights[indices])
             feature = col_picked[column]
 
             # renew node's attributes
@@ -350,30 +351,31 @@ class DecisionTreeClassifier:
 if __name__ == '__main__':
     alpha = 0.1
     row, col = 20, 8
-    num_random_feature = 2
+    random_feature_ratio = None
     no_of_randint = 3
 
     dtc_unprune = DecisionTreeClassifier()
-    dtc_random = DecisionTreeClassifier(num_random_feature=num_random_feature)
+    dtc_random = DecisionTreeClassifier(random_feature_ratio=random_feature_ratio)
     dtc_prune = DecisionTreeClassifier(pruning_rate=alpha)
 
     X = np.zeros((row, col))
 
     # X contains category
-#    X[:, 0] = np.random.rand(row)
-#    X[:, 1] = np.random.randint(no_of_randint, size=row)
-#    X[:, 2] = np.random.normal(size=row)
-#    is_categorical = [0, 1, 0]
-#    y_cond1 = 'X[:, 1] == 1'
-#    y_cond2 = 'X[:, 2] >= 0'
+    X[:, 0] = np.random.rand(row)
+    X[:, 1] = np.random.normal(size=row)
+    X[:, 2] = np.random.randint(no_of_randint, size=row)
+    is_categorical = np.zeros(col)
+    is_categorical[2] = 1
+    y_cond1 = 'X[:, 2] == 1'
+    y_cond2 = 'X[:, 1] >= 0'
 
     # X not contain category
-    X[:, 0] = np.random.normal(-1, 0.5, row)
-    X[:, 1] = np.random.normal(1, 2, row)
-    X[:, 2] = np.random.normal(0, 0.5, row)
-    is_categorical = np.zeros(col)
-    y_cond1 = 'X[:, 0] < -1'
-    y_cond2 = 'X[:, 1] > 1'
+#    X[:, 0] = np.random.normal(-1, 0.5, row)
+#    X[:, 1] = np.random.normal(1, 2, row)
+#    X[:, 2] = np.random.normal(0, 0.5, row)
+#    is_categorical = np.zeros(col)
+#    y_cond1 = 'X[:, 0] < -1'
+#    y_cond2 = 'X[:, 1] > 1'
 
     # y
     y = np.zeros(row)
