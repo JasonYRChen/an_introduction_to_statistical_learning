@@ -2,6 +2,8 @@ import heapq
 import numpy as np
 from collections import deque
 from abc import ABC, abstractmethod
+from sklearn.datasets import make_regression, make_classification
+from sklearn.tree import DecisionTreeRegressor as skDTR
 
 
 np.set_printoptions(precision=3)
@@ -155,11 +157,11 @@ class Tree:
 
 
 class _DecisionTreeBase(ABC):
-    def __init__(self, pruning_rate=0,  max_depth=np.inf, loss_function=None,
+    def __init__(self, pruning_rate=0, function=None, max_depth=np.inf,
                  random_feature_ratio=1):
         self.tree = Tree(max_depth)
         self.pruning_rate = pruning_rate
-        self._loss_func = self._loss_function(loss_function) # string
+        self._loss_func = self._loss_function(function) # string
         self._random_feature_ratio = random_feature_ratio # None for sqrt(feature)
 
     @abstractmethod
@@ -170,9 +172,6 @@ class _DecisionTreeBase(ABC):
             Return the corresponding method of the name.
         """
         pass
-
-    def test(self):
-        return 'this is a test'
 
     @staticmethod
     def _renew_indices(X, indices, feature, criterion, sign):
@@ -336,17 +335,17 @@ class _DecisionTreeBase(ABC):
         return y_hat
 
 
-class DecisionTreeClassifier:
+class DecisionTreeClassifier(_DecisionTreeBase):
     def __init__(self, pruning_rate=0, function='gini', max_depth=np.inf,
                  random_feature_ratio=1):
-        self.tree = Tree(max_depth)
-        self.pruning_rate = pruning_rate
-        self._random_feature_ratio = random_feature_ratio # None for sqrt(feature)
-        self._impurity_functions = {'entropy': self.loss_entropy, 
-                                    'gini': self.loss_gini, 
-                                    'classification': self.loss_classification
-                                   }
-        self._func = self._impurity_functions[function]
+        super().__init__(pruning_rate, function, max_depth, random_feature_ratio)
+
+    def _loss_function(self, name):
+        func = {'entropy': self.loss_entropy, 
+                'gini': self.loss_gini, 
+                'classification': self.loss_classification
+               }
+        return func[name]
 
     @staticmethod
     def _class_probability(y, sample_weights):
@@ -372,259 +371,77 @@ class DecisionTreeClassifier:
         return impurity
 
     @staticmethod
-    def _set_prediction(y, nodes):
-        for node in nodes:
+    def _set_prediction(y, leaves):
+        for node in leaves:
             indices = node.indices
             values, counts = np.unique(y[indices], return_counts=True)
             node.y_hat = values[np.argmax(counts)]
 
+
+class DecisionTreeRegressor(_DecisionTreeBase):
+    def __init__(self, pruning_rate=0, function='mse', max_depth=np.inf,
+                 random_feature_ratio=1):
+        super().__init__(pruning_rate, function, max_depth, random_feature_ratio)
+
+    def _loss_function(self, name):
+        func = {'mse': self._mse}
+        return func[name]
+
     @staticmethod
-    def _renew_indices(X, indices, feature, criterion, sign):
-        # partition indices by sign
-        if sign == '==':
-            l_idx = np.where(X[indices][:, feature] == criterion)[0]
-            r_idx = np.where(X[indices][:, feature] != criterion)[0]
-        else:
-            assert sign == '<='
-            l_idx = np.where(X[indices][:, feature] <= criterion)[0]
-            r_idx = np.where(X[indices][:, feature] > criterion)[0]
-             
-        # indices for left and right sub nodes
-        left_indices = indices[l_idx]
-        right_indices = indices[r_idx]
+    def _mse(y, sample_weights):
+        sample_weights /= sum(sample_weights)
+        mse = np.sum((sample_weights * (y - y.mean())**2)) ** 0.5
+        return mse
 
-        return left_indices, right_indices
-
-    def _total_impurity(self, leaves):
-        total_elements = 0
-        total_impurity = 0
-        for leaf in leaves:
-            total_elements += len(leaf.indices)
-            total_impurity += len(leaf.indices) * leaf.impurity
-        total_impurity /= total_elements
-
-        return total_elements, total_impurity
-
-    def _prune(self):
-        # Except for the root, every node must have a sibling. 
-        # They must exist or be removed together.
-
-        new_leaves = set(self.tree.leaves) # need to covert to deque at the end
-        heap = list(self.tree.leaves)
-        heapq.heapify(heap)
-        alpha = self.pruning_rate
-
-        total_elements, total_impurity = self._total_impurity(self.tree.leaves)
-        penalty = total_impurity + alpha * len(new_leaves)
-
-        while heap:
-            node = heapq.heappop(heap)
-            if node in new_leaves:
-                sibling = node._sibling()
-
-                if sibling is not None and sibling.is_leaf():
-                    # only if the node is not the root and its sibling is a
-                    # leaf can join the pruning process
-                    parent = node.parent
-                    new_total_impurity = total_impurity +\
-                                      (len(parent.indices)*parent.impurity -\
-                                       len(node.indices)*node.impurity -\
-                                       len(sibling.indices)*sibling.impurity) /\
-                                       total_elements
-                    new_penalty = new_total_impurity + alpha*(len(new_leaves)-1)
-
-                    if new_penalty < penalty:
-                        penalty, total_impurity = new_penalty, new_total_impurity
-                        new_leaves.remove(node)
-                        new_leaves.remove(sibling)
-                        new_leaves.add(node.parent)
-                        heapq.heappush(heap, node.parent)
-
-        new_leaves = deque(new_leaves) # convert to deque to be compatible
-
-        # cut off all the leaves beneath new leaves
-        for leaf in new_leaves:
-            leaf.left = leaf.right = None
-
-        return new_leaves
-
-    def fit(self, X, y, is_categorical=None, sample_weights=None):
-        # 'is_categorical' is an array to specify which features (columns) in
-        # 'X' are categorical data
-
-        rows, cols = X.shape
-
-        if is_categorical is None:
-            is_categorical = np.zeros(cols)
-        
-        if sample_weights is None:
-            sample_weights = np.ones(rows)
-
-        col_indices = np.arange(cols) # indices of columns
-        if self._random_feature_ratio is None:
-            feature_num = round((cols) ** 0.5)
-        else:
-            feature_num = round(self._random_feature_ratio * cols)
-
-        self.tree.root = self.tree.create_node(np.arange(rows)) # create root
-        nodes_to_process = deque([self.tree.root]) # nodes to split
-
-        while nodes_to_process:
-            node = nodes_to_process.popleft()
+    @staticmethod
+    def _set_prediction(y, leaves):
+        for node in leaves:
             indices = node.indices
-
-            # random choose features w/o replacement at given number
-            col_picked = np.random.choice(col_indices, feature_num, False)
-
-            # greedily find partition criterion
-            column, criterion, sign = _decision_stump(X[indices][:, col_picked],
-                y[indices], self._func, is_categorical[col_picked], 
-                sample_weights[indices])
-            feature = col_picked[column]
-
-            # renew node's attributes
-            node.feature, node.criterion, node.sign, node.impurity = \
-                feature, criterion, sign,\
-                self.loss_classification(y[indices], sample_weights[indices])
-
-            # partition indices by sign
-            left_indices, right_indices = self._renew_indices(X, indices,
-                feature, criterion, sign)
-
-            # nodes to further partition or end as leaves
-            if not (left_indices.size and right_indices.size) or\
-                node.depth == self.tree.max_depth:
-                self.tree.leaves.append(node) # end as leaf
-            else:
-                # connect parent node and descendants
-                self.tree._link_nodes(node,
-                    self.tree.create_node(left_indices, node.depth+1),
-                    self.tree.create_node(right_indices, node.depth+1))
-
-                # to further partition
-                nodes_to_process.append(node.left)
-                nodes_to_process.append(node.right)
-
-        # prune the tree if pruning rate > 0
-        if self.pruning_rate:
-            new_leaves = self._prune()
-            self.tree.leaves = new_leaves
-
-        self._set_prediction(y, self.tree.leaves) # prediction of each leaf
-
-    def predict(self, X):
-        rows = X.shape[0]
-        y_hat = np.empty(rows)
-        for i in range(rows):
-            node = self.tree.root
-            while not node.is_leaf():
-                feature, sign, criterion = node.feature, node.sign, node.criterion
-                cond1 = (sign == '==') and (X[i, feature] == criterion)
-                cond2 = (sign == '<=') and (X[i, feature] <= criterion)
-                if cond1 or cond2:
-                    node = node.left
-                else:
-                    assert (X[i, feature] != criterion) or\
-                           (X[i, feature] > criterion)
-                    node = node.right
-            y_hat[i] = node.y_hat
-
-        return y_hat
+            node.y_hat = y[indices].mean()
 
 
 if __name__ == '__main__':
+    samples = 100
+    features = 8
+    informatives = 3
+    n_class = 2 # for classification
+
     alpha = 0.1
-    row, col = 20, 8
     random_feature_ratio = None
-    no_of_randint = 3
 
-    dtc_unprune = DecisionTreeClassifier()
-    dtc_random = DecisionTreeClassifier(random_feature_ratio=random_feature_ratio)
-    dtc_prune = DecisionTreeClassifier(pruning_rate=alpha)
+    # classification
+#    X, y = make_classification(samples, features, n_informative=informatives,
+#                               n_classes=n_class)
 
-    X = np.zeros((row, col))
+#    dtc_unprune = DecisionTreeClassifier()
+#    dtc_random = DecisionTreeClassifier(random_feature_ratio=random_feature_ratio)
+#    dtc_prune = DecisionTreeClassifier(pruning_rate=alpha)
 
-    # X contains category
-    X[:, 0] = np.random.rand(row)
-    X[:, 1] = np.random.normal(size=row)
-    X[:, 2] = np.random.randint(no_of_randint, size=row)
-    is_categorical = np.zeros(col)
-    is_categorical[2] = 1
-    y_cond1 = 'X[:, 2] == 1'
-    y_cond2 = 'X[:, 1] >= 0'
+#    dtc_unprune.fit(X, y)
+#    dtc_random.fit(X, y)
+#    dtc_prune.fit(X, y)
 
-    # X not contain category
-#    X[:, 0] = np.random.normal(-1, 0.5, row)
-#    X[:, 1] = np.random.normal(1, 2, row)
-#    X[:, 2] = np.random.normal(0, 0.5, row)
-#    is_categorical = np.zeros(col)
-#    y_cond1 = 'X[:, 0] < -1'
-#    y_cond2 = 'X[:, 1] > 1'
+#    print('------unprune------')
+#    dtc_unprune.tree.expand_tree()
+#    print('------random------')
+#    dtc_random.tree.expand_tree()
+#    print('------prune------')
+#    dtc_prune.tree.expand_tree()
 
-    # y
-    y = np.zeros(row)
-    cond1 = eval(y_cond1)
-    cond2 = eval(y_cond2)
-    y[cond1] = np.trunc(np.random.normal(11, 1, sum(cond1)))
-    y[~cond1 & cond2] = np.trunc(np.random.normal(22, 1, len(y[~cond1 & cond2])))
+    # regression
+    X, y = make_regression(samples, features, n_informative=informatives)
 
-    # sample_weights:
-#    sw = np.random.rand(10)
-    sw = None
+    dtr_unprune = DecisionTreeRegressor()
+    dtr_random = DecisionTreeRegressor(random_feature_ratio=random_feature_ratio)
+    dtr_prune = DecisionTreeRegressor(pruning_rate=alpha)
 
-#    print(f'y condition 1: {y_cond1}')
-#    print(f'y condition 2: {y_cond2}')
-#    print(f'X & y:\n{np.hstack((X, y.reshape(-1, 1)))}')
+    dtr_unprune.fit(X, y)
+    dtr_random.fit(X, y)
+    dtr_prune.fit(X, y)
 
-    print('---------Unpruned----------')
-    dtc_unprune.fit(X, y, is_categorical, sw)
-    dtc_unprune.tree.expand_tree()
-
-    print('---------random forest like----------')
-    dtc_random.fit(X, y, is_categorical, sw)
-    dtc_random.tree.expand_tree()
-
-    print('---------Pruned----------')
-    dtc_prune.fit(X, y, is_categorical, sw)
-    dtc_prune.tree.expand_tree()
-
-    # prediction
-#    y_hat = dtc.predict(X)
-#    error = np.sum(y_hat != y) / row
-#    print(f'\nprediction error with training data: {error*100}%')
-
-
-## test case for _decision_stump
-#def y_classify(y, sample_weights):
-#    sample_weights /= sum(sample_weights)
-#    p = np.array([sum(sample_weights[y==k]) for k in np.unique(y)])
-#    impurity = p @ (1 - p)
-#    return impurity
-#def y_regress(y, sample_weights):
-#    sample_weights /= sum(sample_weights)
-#    y_mean = sample_weights @ y
-#    mse = sample_weights @ (y - y_mean)**2
-#    return mse
-#col_classify = 2
-#impurity_func = y_classify
-##impurity_func = y_regress
-#X = (np.random.rand(rows, cols) - 0.5) * 10
-#X[:, col_classify] = np.random.randint(3, size=rows)
-
-## y for classification
-#y = np.random.randint(1, 3, size=rows)
-##y[X[:, 1] > 0] = 0 # for X_number
-#y[X[:, 2] == 1] = 0 # for X_classification
-
-## y for regression
-##y = np.random.normal(-1, 0.5, size=rows)
-##y[X[:, 1] > 0] = np.random.normal(1, 0.5, size=sum(X[:, 1]>0)) # for X_number
-##y[X[:, 2] == 1] = np.random.normal(1, 0.5, size=sum(X[:, 2]==1)) # for X_classify
-
-#is_categorical = np.zeros(cols)
-#is_categorical[col_classify] = 1
-#sw = np.ones(rows)
-#print(f'X:\n{X}\ny: {y}\nis category: {is_categorical}\nsample weights: {sw}')
-#print(f'data:\n{np.hstack((X, y.reshape(-1, 1)))}\nis category: {is_categorical}\nsample weights: {sw}')
-#ft, criterion, sign = _decision_stump(X, y, impurity_func, is_categorical, sw)
-#print(f'feature: {ft}, criterion: {criterion}, sign: {sign}')
+    print('------unprune------')
+    dtr_unprune.tree.expand_tree()
+    print('------random------')
+    dtr_random.tree.expand_tree()
+    print('------prune------')
+    dtr_prune.tree.expand_tree()
