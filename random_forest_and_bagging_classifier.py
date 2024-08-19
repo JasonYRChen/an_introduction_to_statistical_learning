@@ -1,7 +1,11 @@
 import numpy as np
 import multiprocessing as mp
 from multiprocessing import Pipe
-from decision_tree import DecisionTreeClassifier
+from decision_tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.datasets import make_regression, make_classification
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier as skRFC
+from sklearn.ensemble import RandomForestRegressor as skRFR
 
 
 np.set_printoptions(precision=3)
@@ -123,8 +127,9 @@ class _BaseForest:
                 v, c = np.unique(y_hats[i, dummies[i]==1], return_counts=True)
                 y_hat[i] = v[np.argmax(c)]
         elif self._agg_func == 'mean':
-            for i in range(len(y_hat)):
-                y_hat[i] = y_hats[i, dummies[i]==1].mean(1)
+            y_hat = np.empty(y_hats.shape[0])
+            for i in range(len(y_hats)):
+                y_hat[i] = y_hats[i, dummies[i]==1].mean()
         else:
             y_hat = self._agg_func(y_hats, dummies)
 
@@ -134,7 +139,7 @@ class _BaseForest:
         if self._is_clsf:
             error = np.sum(y_hat != y) / len(y)
         else:
-            error = (np.sum((y_hat - y)**2))**0.5 / len(y)
+            error = (np.sum((y_hat - y)**2) / len(y))**0.5
     
         return error
 
@@ -186,6 +191,15 @@ class BaggingClassifier(_BaseForest):
                          tree_number, in_bag_ratio)
 
 
+class BaggingRegressor(_BaseForest):
+    def __init__(self, tree_number=100, in_bag_ratio=0.632, 
+                 impurity_function='mse'):
+        dtc_para = {'function': impurity_function}
+        super().__init__(DecisionTreeRegressor, dtc_para, 
+                         tree_number, in_bag_ratio, False, 'mean')
+
+
+
 class RandomForestClassifier(_BaseForest):
     def __init__(self, tree_number=100, in_bag_ratio=0.632, 
                  random_feature_ratio=None, impurity_function='gini'):
@@ -195,45 +209,81 @@ class RandomForestClassifier(_BaseForest):
                          tree_number, in_bag_ratio)
 
 
+class RandomForestRegressor(_BaseForest):
+    def __init__(self, tree_number=100, in_bag_ratio=0.632, 
+                 random_feature_ratio=None, impurity_function='mse'):
+        dtc_para = {'random_feature_ratio': random_feature_ratio,
+                    'function': impurity_function}
+        super().__init__(DecisionTreeRegressor, dtc_para, 
+                         tree_number, in_bag_ratio, False, 'mean')
+
+
 if __name__ == '__main__':
-    trees = 1000
+    samples = 1000
+    features = 8
+    n_informative = 3
+
+    trees = 100
     in_bag_ratio = 0.632
     feat_ratio = None
     function = 'gini'
-    multiprocess_on = False
 
-    bg = BaggingClassifier(trees, in_bag_ratio, function)
-    rf = RandomForestClassifier(trees, in_bag_ratio, feat_ratio, function)
+#    # classification
+#    bg = BaggingClassifier(trees, in_bag_ratio, function)
+#    rf = RandomForestClassifier(trees, in_bag_ratio, feat_ratio, function)
+#    skrfc = skRFC(trees)
 
-#    X = np.zeros((25, 3))
-    X = np.random.rand(25, 10)
-    X[:, 0] = np.random.normal(-1, 1, size=25)
-    X[:, 1] = np.random.normal(1, 1, size=25)
-    X[:, 2] = np.random.normal(2, 0.5, size=25)
-    X[:, 3] = np.random.randint(2, size=25)
-    y = np.zeros(25)
-    cond1 = X[:, 0] > -1 
-    cond2 = (X[:, 1] > 1) & (X[:, 2] < 2)
-    y[cond1] = 1
-    y[cond2] = 2
-    is_categorical = np.zeros(10)
-    is_categorical[3] = 1
-#    is_categorical = None
+#    X, y = make_classification(samples, features, n_informative=n_informative)
+#    X_train, X_test, y_train, y_test = train_test_split(X, y)
 
-    # Out-of-bag error during fitting
-    oob_bg = bg.fit(X, y, is_categorical)
-    oob_rf = rf.fit(X, y, is_categorical)
+#    # fitting
+#    oob_bg = bg.fit(X_train, y_train)
+#    oob_rf = rf.fit(X_train, y_train)
+#    skrfc.fit(X_train, y_train)
 
-    # prediction with X
-    y_bg = bg.predict(X)
-    y_rf = rf.predict(X)
+#    # predict
+#    y_bg = bg.predict(X_test)
+#    y_rf = rf.predict(X_test)
+#    y_sk = skrfc.predict(X_test)
 
-    # error with X
-    e_bg = bg.prediction_error(y_bg, y)
-    e_rf = rf.prediction_error(y_rf, y)
+#    # error
+#    e_bg = bg.prediction_error(y_bg, y_test)
+#    e_rf = rf.prediction_error(y_rf, y_test)
+#    e_sk = rf.prediction_error(y_sk, y_test)
+
+#    # print errors
+#    print(f'OOB(bagging): {oob_bg*100:.2f}%')
+#    print(f'OOB(randfrs): {oob_rf*100:.2f}%')
+#    print(f'test error(bagging): {e_bg*100:.2f}%')
+#    print(f'test error(randfrs): {e_rf*100:.2f}%')
+#    print(f'test error(skrfc): {e_sk*100:.2f}%')
+
+    # classification
+    bg = BaggingRegressor(trees, in_bag_ratio)
+    rf = RandomForestRegressor(trees, in_bag_ratio, feat_ratio)
+    skrfr = skRFR(trees)
+
+    X, y = make_regression(samples, features, n_informative=n_informative)
+    X_train, X_test, y_train, y_test = train_test_split(X, y)
+
+    # fitting
+    oob_bg = bg.fit(X_train, y_train)
+    oob_rf = rf.fit(X_train, y_train)
+    skrfr.fit(X_train, y_train)
+
+    # predict
+    y_bg = bg.predict(X_test)
+    y_rf = rf.predict(X_test)
+    y_sk = skrfr.predict(X_test)
+
+    # error
+    e_bg = bg.prediction_error(y_bg, y_test)
+    e_rf = rf.prediction_error(y_rf, y_test)
+    e_sk = rf.prediction_error(y_sk, y_test)
 
     # print errors
-    print(f'OOB(bagging): {oob_bg*100:.2f}%')
-    print(f'OOB(randfrs): {oob_rf*100:.2f}%')
-    print(f'training error(bagging): {e_bg*100:.2f}%')
-    print(f'training error(randfrs): {e_rf*100:.2f}%')
+    print(f'OOB(bagging): {oob_bg}')
+    print(f'OOB(randfrs): {oob_rf}')
+    print(f'test rms(bagging): {e_bg}')
+    print(f'test rms(randfrs): {e_rf}')
+    print(f'test rms(skrfr): {e_sk}')
