@@ -426,47 +426,52 @@ if __name__ == '__main__':
     informatives = 3
     n_class = 2 # for classification
 
-    alpha = 100
+    alpha = 0.01
     random_feature_ratio = None
 
     # classification
-#    X, y = make_classification(samples, features, n_informative=informatives,
-#                               n_classes=n_class)
+    X, y = make_classification(samples, features, n_informative=informatives,
+                               n_classes=n_class)
 
-#    dtc_unprune = DecisionTreeClassifier()
-#    dtc_random = DecisionTreeClassifier(random_feature_ratio=random_feature_ratio)
-#    dtc_prune = DecisionTreeClassifier(pruning_rate=alpha)
+    dtc_unprune = DecisionTreeClassifier()
+    dtc_random = DecisionTreeClassifier(random_feature_ratio=random_feature_ratio)
+    dtc_prune = DecisionTreeClassifier(pruning_rate=alpha)
+    dtc_prune_leaves = DecisionTreeClassifier(max_leaves=10)
 
-#    dtc_unprune.fit(X, y)
-#    dtc_random.fit(X, y)
-#    dtc_prune.fit(X, y)
-
-#    print('------unprune------')
-#    dtc_unprune.tree.expand_tree()
-#    print('------random------')
-#    dtc_random.tree.expand_tree()
-#    print('------prune------')
-#    dtc_prune.tree.expand_tree()
-
-    # regression
-    X, y = make_regression(samples, features, n_informative=informatives)
-
-    dtr_unprune = DecisionTreeRegressor()
-    dtr_random = DecisionTreeRegressor(random_feature_ratio=random_feature_ratio)
-    dtr_prune_depth = DecisionTreeRegressor(pruning_rate=alpha)
-    dtr_prune_leaves = DecisionTreeRegressor(max_leaves=10)
-
-    dtr_unprune.fit(X, y)
-    dtr_random.fit(X, y)
-    dtr_prune_depth.fit(X, y)
-    dtr_prune_leaves.fit(X, y)
+    dtc_unprune.fit(X, y)
+    dtc_random.fit(X, y)
+    dtc_prune.fit(X, y)
+    dtc_prune_leaves.fit(X, y)
 
     print('------unprune------')
-    dtr_unprune.tree.expand_tree()
+    dtc_unprune.tree.expand_tree()
     print('------random------')
-    dtr_random.tree.expand_tree()
+    dtc_random.tree.expand_tree()
     print('------prune depth------')
-    dtr_prune_depth.tree.expand_tree()
+    dtc_prune.tree.expand_tree()
     print('------prune leaves number------')
-    dtr_prune_leaves.tree.expand_tree()
-    print(f'leaves number: {len(dtr_prune_leaves.tree.leaves)}')
+    dtc_prune_leaves.tree.expand_tree()
+    print(f'leaves number: {len(dtc_prune_leaves.tree.leaves)}')
+
+    # regression
+#    X, y = make_regression(samples, features, n_informative=informatives)
+
+#    dtr_unprune = DecisionTreeRegressor()
+#    dtr_random = DecisionTreeRegressor(random_feature_ratio=random_feature_ratio)
+#    dtr_prune_depth = DecisionTreeRegressor(pruning_rate=alpha)
+#    dtr_prune_leaves = DecisionTreeRegressor(max_leaves=10)
+
+#    dtr_unprune.fit(X, y)
+#    dtr_random.fit(X, y)
+#    dtr_prune_depth.fit(X, y)
+#    dtr_prune_leaves.fit(X, y)
+
+#    print('------unprune------')
+#    dtr_unprune.tree.expand_tree()
+#    print('------random------')
+#    dtr_random.tree.expand_tree()
+#    print('------prune depth------')
+#    dtr_prune_depth.tree.expand_tree()
+#    print('------prune leaves number------')
+#    dtr_prune_leaves.tree.expand_tree()
+#    print(f'leaves number: {len(dtr_prune_leaves.tree.leaves)}')
