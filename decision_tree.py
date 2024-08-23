@@ -158,11 +158,12 @@ class Tree:
 
 class _DecisionTreeBase(ABC):
     def __init__(self, pruning_rate=0, function=None, max_depth=np.inf,
-                 random_feature_ratio=1):
+                 random_feature_ratio=1, max_leaves=None):
         self.tree = Tree(max_depth)
-        self.pruning_rate = pruning_rate
+        self._pruning_rate = pruning_rate
         self._loss_func = self._loss_function(function) # string
         self._random_feature_ratio = random_feature_ratio # None for sqrt(feature)
+        self._max_leaves = max_leaves # max number of leaves. None is unlimited
 
     @abstractmethod
     def _loss_function(self, name):
@@ -200,19 +201,18 @@ class _DecisionTreeBase(ABC):
 
         return total_elements, total_impurity
 
-    def _prune(self):
+    def _prune(self, alpha):
         # Except for the root, every node must have a sibling. 
         # They must exist or be removed together.
 
         new_leaves = set(self.tree.leaves) # need to covert to deque at the end
         heap = list(self.tree.leaves)
         heapq.heapify(heap)
-        alpha = self.pruning_rate
 
         total_elements, total_impurity = self._total_impurity(self.tree.leaves)
         penalty = total_impurity + alpha * len(new_leaves)
 
-        while heap:
+        while heap: 
             node = heapq.heappop(heap)
             if node in new_leaves:
                 sibling = node._sibling()
@@ -234,6 +234,12 @@ class _DecisionTreeBase(ABC):
                         new_leaves.remove(sibling)
                         new_leaves.add(node.parent)
                         heapq.heappush(heap, node.parent)
+
+                        # break if max leaves specified and reach max leaves
+                        if self._max_leaves is not None and\
+                            len(new_leaves) == self._max_leaves:
+
+                            break
 
         new_leaves = deque(new_leaves) # convert to deque to be compatible
 
@@ -308,10 +314,18 @@ class _DecisionTreeBase(ABC):
                 nodes_to_process.append(node.left)
                 nodes_to_process.append(node.right)
 
-        # prune the tree if pruning rate > 0
-        if self.pruning_rate:
-            new_leaves = self._prune()
+        # prune by condition
+        if self._pruning_rate: # prune if pruning rate > 0
+            new_leaves = self._prune(self._pruning_rate)
             self.tree.leaves = new_leaves
+        elif self._max_leaves is not None and (len(self.tree.leaves) >\
+             self._max_leaves): # prune if max_leaves specified
+
+            alpha = 10
+            while len(self.tree.leaves) > self._max_leaves:
+                new_leaves = self._prune(alpha)
+                self.tree.leaves = new_leaves
+                alpha *= 10
 
         self._set_prediction(y, self.tree.leaves) # prediction of each leaf
 
@@ -337,8 +351,11 @@ class _DecisionTreeBase(ABC):
 
 class DecisionTreeClassifier(_DecisionTreeBase):
     def __init__(self, pruning_rate=0, function='gini', max_depth=np.inf,
-                 random_feature_ratio=1):
-        super().__init__(pruning_rate, function, max_depth, random_feature_ratio)
+                 random_feature_ratio=1, max_leaves=None):
+        super().__init__(pruning_rate=pruning_rate, function=function, 
+                         max_depth=max_depth, 
+                         random_feature_ratio=random_feature_ratio,
+                         max_leaves=max_leaves)
 
     def _loss_function(self, name):
         func = {'entropy': self.loss_entropy, 
@@ -380,8 +397,11 @@ class DecisionTreeClassifier(_DecisionTreeBase):
 
 class DecisionTreeRegressor(_DecisionTreeBase):
     def __init__(self, pruning_rate=0, function='mse', max_depth=np.inf,
-                 random_feature_ratio=1):
-        super().__init__(pruning_rate, function, max_depth, random_feature_ratio)
+                 random_feature_ratio=1, max_leaves=None):
+        super().__init__(pruning_rate=pruning_rate, function=function,
+                         max_depth=max_depth,
+                         random_feature_ratio=random_feature_ratio,
+                         max_leaves=max_leaves)
 
     def _loss_function(self, name):
         func = {'mse': self._mse}
@@ -406,7 +426,7 @@ if __name__ == '__main__':
     informatives = 3
     n_class = 2 # for classification
 
-    alpha = 0.1
+    alpha = 100
     random_feature_ratio = None
 
     # classification
@@ -433,15 +453,20 @@ if __name__ == '__main__':
 
     dtr_unprune = DecisionTreeRegressor()
     dtr_random = DecisionTreeRegressor(random_feature_ratio=random_feature_ratio)
-    dtr_prune = DecisionTreeRegressor(pruning_rate=alpha)
+    dtr_prune_depth = DecisionTreeRegressor(pruning_rate=alpha)
+    dtr_prune_leaves = DecisionTreeRegressor(max_leaves=10)
 
     dtr_unprune.fit(X, y)
     dtr_random.fit(X, y)
-    dtr_prune.fit(X, y)
+    dtr_prune_depth.fit(X, y)
+    dtr_prune_leaves.fit(X, y)
 
     print('------unprune------')
     dtr_unprune.tree.expand_tree()
     print('------random------')
     dtr_random.tree.expand_tree()
-    print('------prune------')
-    dtr_prune.tree.expand_tree()
+    print('------prune depth------')
+    dtr_prune_depth.tree.expand_tree()
+    print('------prune leaves number------')
+    dtr_prune_leaves.tree.expand_tree()
+    print(f'leaves number: {len(dtr_prune_leaves.tree.leaves)}')
