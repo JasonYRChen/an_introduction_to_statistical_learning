@@ -50,7 +50,7 @@ class _BaseForest:
         conn.send(y_hat)
         conn.close()
 
-    def fit(self, X, y, is_categorical=None, do_oob_test=True):
+    def fit(self, X, y, is_categorical=None, do_oob_test=False):
         rows, cols = X.shape
 
         # initialize out-of-bag indicator
